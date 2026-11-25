@@ -1,4 +1,4 @@
-import { scoreEssay } from './browser-score.js?v=2';
+import { scoreEssay } from './browser-score.js?v=3';
 
 self.onmessage = async ({data}) => {
   if (data.type !== 'score') return;

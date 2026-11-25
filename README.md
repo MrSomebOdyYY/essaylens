@@ -6,7 +6,7 @@
 
 ## 使用
 
-1. 在支持 WebGPU 的桌面浏览器中打开网站，并启用图形加速。首次分析会从 Hugging Face 下载约 1.74 GB 的模型，需要稳定的网络和数 GB 可用内存。手机或低内存电脑可能无法完成分析。
+1. 使用新版桌面 Microsoft Edge 或 Chrome 打开网站。首次分析会从 Hugging Face 下载约 1.74 GB 的模型，请预留至少 2 GB 浏览器存储空间并保持网络连接。权重缓存在本机，后续分析会重复使用。手机或低内存电脑可能无法完成分析。
 2. 粘贴英文并保留自然段换行，或点击「填入示例」。每次最多 60,000 个字符。
 3. 点击「分析作文」。页面会显示加载和分析进度，也可以点击「停止」中止任务。全文评分至少需要 50 个英文单词和 3 个句子，短段可以单独提交。
 
@@ -29,4 +29,4 @@
 python3 -m http.server 8000 --bind 127.0.0.1
 ```
 
-GitHub Pages 可从这个仓库的根目录发布静态文件。浏览器推理使用 Desklib v1.01 的 ONNX 转换及 Transformers.js。[ONNX 权重和转换说明](https://huggingface.co/GabeuxDev/ai-text-detector-v1.01-onnx) · [Transformers.js](https://github.com/huggingface/transformers.js)
+GitHub Pages 可从这个仓库的根目录发布静态文件。程序使用 Transformers.js 分词，并用 ONNX Runtime Web 的 WebAssembly 后端分批执行 Desklib v1.01 的四组模型层。[ONNX 权重和转换说明](https://huggingface.co/GabeuxDev/ai-text-detector-v1.01-onnx) · [Transformers.js](https://github.com/huggingface/transformers.js)

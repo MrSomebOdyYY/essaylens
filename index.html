@@ -57,7 +57,7 @@ mark{background:#fae7a7;color:inherit}
     <div class="row"><label for="essay"><strong>英文作文</strong></label><button class="example" id="sample">填入示例</button></div>
     <textarea spellcheck="false" maxlength="60000" id="essay" placeholder="Paste your essay here…" aria-describedby="inputHint"></textarea>
     <small id="inputHint">短段也可单独提交。多段作文请保留自然段换行。</small>
-    <small id="loadHint">首次分析会下载约 1.74 GB 的模型。模型需要 WebGPU，建议使用具备数 GB 可用内存的桌面电脑。手机可能因内存不足而无法运行。</small>
+    <small id="loadHint">首次分析会下载约 1.74 GB 的模型。请预留至少 2 GB 浏览器存储空间，建议使用新版桌面 Edge 或 Chrome。模型会缓存在本机供再次使用。</small>
     <div class="row"><small id="count"></small><div class="actions"><button id="cancel" hidden>停止</button><button id="run">分析作文</button></div></div>
   </section>
   <aside aria-live="polite">
@@ -201,15 +201,15 @@ get('run').onclick = () => {
     get('summary').textContent = '请通过网站地址打开 EssayLens，以启用浏览器模型。';
     return;
   }
-  if (!navigator.gpu) {
-    get('summary').textContent = '检测需要 WebGPU。请使用支持 WebGPU 的桌面浏览器，并启用图形加速。';
+  if (!navigator.storage?.getDirectory || !window.WebAssembly) {
+    get('summary').textContent = '检测需要 WebAssembly 和浏览器本地存储。请使用新版桌面 Edge 或 Chrome。';
     return;
   }
   const id = ++pendingId;
   busy(true);
   get('summary').textContent = '正在准备浏览器内的检测模型…';
   try {
-    if (!worker) worker = new Worker('./score-worker.js?v=2', {type:'module'});
+    if (!worker) worker = new Worker('./score-worker.js?v=3', {type:'module'});
     worker.onmessage = ({data}) => {
       if (data.id !== id || id !== pendingId) return;
       if (data.type === 'progress') {
