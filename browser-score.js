@@ -87,27 +87,106 @@ function checkedSentences(text, sentences) {
   return pieces;
 }
 
-export async function scoreEssay(text, notify = () => {}, sentences) {
+// The worker retains a bounded set of exact inputs for rechecks and small edits.
+// Nothing from the essay is written to browser storage.
+const recent = new Map();
+let savedCharacters = 0;
+
+function remember(text, entry) {
+  if (recent.delete(text)) savedCharacters -= text.length;
+  recent.set(text, entry);
+  savedCharacters += text.length;
+  while (recent.size > 512 || savedCharacters > 240000) {
+    const oldest = recent.keys().next().value;
+    recent.delete(oldest);
+    savedCharacters -= oldest.length;
+  }
+}
+
+function validateText(text) {
   if (typeof text !== 'string' || !/[A-Za-z]/.test(text) || text.length > 60000) {
     throw new Error('请输入英文文本，最多 60,000 个字符。');
   }
-  const sentenceMode = sentences !== undefined;
-  const parts = sentenceMode ? checkedSentences(text, sentences)
-    : text.split(/\r\n|[\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]/u).map(line=>line.trim()).filter(Boolean);
+}
+
+async function scoreTexts(distinct, notify, completed, batchSentences = false) {
+  const byText = new Map();
+  const pending = [];
+  for (const text of distinct) {
+    const cached = recent.get(text);
+    if (cached && (batchSentences || !cached.batched)) {
+      remember(text, cached);
+      byText.set(text, cached.result);
+      completed?.(text, cached.result);
+    } else {
+      pending.push(text);
+    }
+  }
+  if (!pending.length) return byText;
   if (!loading) loading = loadModel(notify).catch(error => { loading = undefined; throw error; });
   const {handle, tokenizer} = await loading;
-  const wholeKey = sentenceMode ? text : text.trim();
-  const distinct = [text, ...new Set(parts.filter(part=>part !== wholeKey))];
-  const {classifyMany} = await import('./score-staged.js');
-  const results = await classifyMany(distinct,tokenizer,handle,notify);
-  const byText = new Map(distinct.map((part,i)=>[i === 0 ? wholeKey : part, results[i].score]));
-  if (sentenceMode) {
-    return {...results[0], sentences: parts.map(part=>({text:part, score:byText.get(part)}))};
+  const {classifyMany} = await import('./score-staged.js?v=5');
+  const borderline = [];
+  function record(text, result, batched) {
+    remember(text, {result, batched});
+    byText.set(text, result);
+    completed?.(text, result);
   }
-  const paragraphs = parts.map(line=>({text:line,words:line.split(/\s+/u).length,score:byText.get(line)}));
+  await classifyMany(pending, tokenizer, handle, notify, (index, result, batched) => {
+    const text = pending[index];
+    // Recheck very close decisions using the original one-sentence path before
+    // publishing any flag. This also covers rounding differences across devices.
+    if (batched && Math.abs(result.score - threshold) < 0.0001) borderline.push(text);
+    else record(text, result, batched);
+  }, batchSentences);
+  if (borderline.length) {
+    await classifyMany(borderline, tokenizer, handle, notify, (index, result) => {
+      record(borderline[index], result, false);
+    });
+  }
+  return byText;
+}
+
+export async function scoreWhole(text, notify = () => {}) {
+  validateText(text);
+  return (await scoreTexts([text], notify)).get(text);
+}
+
+export async function scoreEssay(text, notify = () => {}, sentences, onSentence) {
+  validateText(text);
+  if (sentences !== undefined) {
+    const parts = checkedSentences(text, sentences);
+    const whole = await scoreWhole(text, notify);
+    const locations = new Map();
+    for (const [index, part] of parts.entries()) {
+      if (!locations.has(part)) locations.set(part, []);
+      locations.get(part).push(index);
+    }
+    const rows = new Array(parts.length);
+    await scoreTexts(locations.keys(), notify, (part, result) => {
+      for (const index of locations.get(part)) {
+        const row = {text: part, score: result.score};
+        rows[index] = row;
+        onSentence?.(index, row);
+      }
+    }, true);
+    return {...whole, sentences: rows};
+  }
+
+  const parts = text.split(/\r\n|[\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]/u)
+    .map(line => line.trim()).filter(Boolean);
+  const wholeKey = text.trim();
+  const distinct = [text, ...new Set(parts.filter(part => part !== wholeKey))];
+  const results = await scoreTexts(distinct, notify);
+  const whole = results.get(text);
+  const paragraphs = parts.map(line => ({
+    text: line,
+    words: line.split(/\s+/u).length,
+    score: (line === wholeKey ? whole : results.get(line)).score,
+  }));
   const total_words = paragraphs.reduce((total,p)=>total+p.words,0);
   const flagged_words = paragraphs.reduce((total,p)=>total+(p.score>=threshold?p.words:0),0);
-  return {...results[0],paragraph_analysis:{
+  return {...whole,paragraph_analysis:{
     paragraphs,total_words,flagged_words,unknown_words:0,flagged_fraction:flagged_words/total_words,
     unknown_fraction:0,coverage:1,threshold,min_words:1,
   }};

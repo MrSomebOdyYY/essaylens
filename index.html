@@ -15,6 +15,8 @@ footer a{color:inherit}
 #loadHint{display:block;margin:4px 0 12px}
 #cancel{color:#224e41;background:transparent;border:1px solid #7c948b}
 .actions{display:flex;gap:8px}
+.option{display:flex;align-items:center;gap:7px;margin:10px 0;color:#314e44;cursor:pointer}
+.option input{accent-color:#224e41;width:17px;height:17px}
 h1{font:clamp(43px,7vw,80px)/1 Georgia;margin:36px 0 12px;letter-spacing:-.055em}
 h2{margin:0;font-size:20px}
 p{margin:8px 0 20px}
@@ -31,6 +33,7 @@ button:disabled{opacity:.55;cursor:wait}
 .example{background:transparent;color:#285b48;text-decoration:underline;padding:4px}
 #score{display:block;font:64px Georgia,serif;color:#d8eeac;margin:12px 0}
 #summary:empty{display:none}
+#verdict{margin:0 0 8px;color:#d8eeac}
 .scoreNote{margin:14px 0 0;font-size:.9rem}
 #sentenceResults{border-top:1px solid #57786c;margin-top:20px;padding-top:18px}
 #sentenceResults h3{font-size:1.05rem;margin:0}
@@ -50,19 +53,21 @@ button:disabled{opacity:.55;cursor:wait}
   <section>
     <div class="row"><label for="essay"><strong>英文作文</strong></label><button class="example" id="sample">填入示例</button></div>
     <textarea spellcheck="false" maxlength="60000" id="essay" placeholder="Paste your essay here…"></textarea>
+    <label class="option"><input type="checkbox" id="withSentences" checked>同时标出像 AI 写的句子（较慢）</label>
     <small id="loadHint">首次分析会下载约 1.74 GB 的模型。请预留至少 2 GB 浏览器存储空间，建议使用新版桌面 Edge 或 Chrome。下载后可重复使用。</small>
     <div class="row"><small id="count"></small><div class="actions"><button id="cancel" hidden>停止</button><button id="run">分析作文</button></div></div>
   </section>
   <aside aria-labelledby="scoreTitle">
     <h2 id="scoreTitle">AI率</h2>
     <output id="score" aria-labelledby="scoreTitle">—</output>
+    <p id="verdict" hidden></p>
     <p id="summary" role="status"></p>
     <div id="sentenceResults" hidden>
       <h3>更像 AI 写的句子</h3>
       <ul id="sentenceList" lang="en"></ul>
       <p id="sentenceEmpty" hidden>没有句子达到 98% 的判定线。</p>
     </div>
-    <p class="scoreNote">AI率表示模型觉得整篇文章有多像 AI 写的。单句得分达到 98% 就会列出。</p>
+    <p class="scoreNote">AI率是模型对全文的评分，不能换算成 AI 写了多少字。单句得分达到 98% 就会列出。</p>
   </aside>
 </div>
 </main>
@@ -76,6 +81,7 @@ const threshold = 0.98;
 function reset() {
   get('count').textContent = words(input.value).length + ' 个英文单词';
   get('score').textContent = '—';
+  get('verdict').hidden = true;
   get('summary').textContent = '';
   get('sentenceResults').hidden = true;
   get('sentenceList').replaceChildren();
@@ -85,43 +91,35 @@ function reset() {
 function busy(value) {
   get('run').disabled = value;
   get('sample').disabled = value;
+  get('withSentences').disabled = value;
+  get('cancel').textContent = '停止';
   input.readOnly = value;
   get('cancel').hidden = !value;
 }
 
-function submittedSentences(text) {
-  if (!words(text).length) {
-    get('summary').textContent = '请至少输入一个英文单词。';
-    return [];
-  }
-  if (typeof Intl.Segmenter !== 'function') {
-    get('summary').textContent = '请使用支持英文分句的新版浏览器。';
-    return [];
-  }
-  const segmenter = new Intl.Segmenter('en', {granularity:'sentence'});
-  return Array.from(segmenter.segment(text), item => item.segment.trim()).filter(Boolean);
+const validScore = score => Number.isFinite(score) && score >= 0 && score <= 1;
+function renderWhole(score) {
+  if (!validScore(score)) throw new Error('未收到有效的全文分数。');
+  const rounded = (100 * score).toFixed(1) + '%';
+  get('score').textContent = score < threshold && rounded === '98.0%' ? '<98.0%' : rounded;
+  get('verdict').textContent = score >= threshold ? '达到 98% 全文判定线' : '低于 98% 全文判定线';
+  get('verdict').hidden = false;
 }
 
-function renderResult(result, sentences) {
-  const validScore = score => Number.isFinite(score) && score >= 0 && score <= 1;
-  if (!validScore(result?.score) || !Array.isArray(result.sentences)
-      || result.sentences.length !== sentences.length
-      || !result.sentences.every((entry, index) => entry?.text === sentences[index] && validScore(entry.score))) {
-    throw new Error('未收到完整的逐句检测结果。请刷新到最新版后重试。');
+function appendMatch(row, index) {
+  if (row.score < threshold || !/[A-Za-z]/.test(row.text)) return;
+  const item = document.createElement('li');
+  item.textContent = row.text;
+  item.dataset.index = index;
+  const list = get('sentenceList');
+  let left = 0, right = list.children.length;
+  while (left < right) {
+    const middle = Math.floor((left + right) / 2);
+    if (Number(list.children[middle].dataset.index) < index) left = middle + 1;
+    else right = middle;
   }
-  const rounded = (100 * result.score).toFixed(1) + '%';
-  get('score').textContent = result.score < threshold && rounded === '98.0%' ? '<98.0%' : rounded;
-  const list = document.createDocumentFragment();
-  for (const {text, score} of result.sentences) {
-    if (score < threshold || !/[A-Za-z]/.test(text)) continue;
-    const item = document.createElement('li');
-    item.textContent = text;
-    list.append(item);
-  }
-  get('sentenceEmpty').hidden = list.childElementCount > 0;
-  get('sentenceList').replaceChildren(list);
+  list.insertBefore(item, list.children[left] || null);
   get('sentenceResults').hidden = false;
-  get('summary').textContent = '';
 }
 
 input.oninput = reset;
@@ -143,14 +141,25 @@ function stopWorker() {
 
 get('cancel').onclick = () => {
   stopWorker();
-  get('summary').textContent = '已停止分析。';
+  get('summary').textContent = get('verdict').hidden ? '已停止分析。' : '已停止逐句检测，保留已完成的结果。';
 };
 
 get('run').onclick = () => {
   reset();
   const text = input.value;
-  const sentences = submittedSentences(text);
-  if (!sentences.length) return;
+  if (!words(text).length) {
+    get('summary').textContent = '请至少输入一个英文单词。';
+    return;
+  }
+  let sentences;
+  if (get('withSentences').checked) {
+    if (typeof Intl.Segmenter !== 'function') {
+      get('summary').textContent = '请使用新版浏览器，或取消逐句检测以查看全文分数。';
+      return;
+    }
+    const segmenter = new Intl.Segmenter('en', {granularity:'sentence'});
+    sentences = Array.from(segmenter.segment(text), item => item.segment.trim()).filter(Boolean);
+  }
   if (location.protocol === 'file:') {
     get('summary').textContent = '请通过网站地址打开 EssayLens，以启用浏览器模型。';
     return;
@@ -160,25 +169,48 @@ get('run').onclick = () => {
     return;
   }
   const id = ++pendingId;
+  const completed = new Set();
   busy(true);
   get('summary').textContent = '正在准备浏览器内的检测模型…';
   try {
-    if (!worker) worker = new Worker('./score-worker.js?v=4', {type:'module'});
+    if (!worker) worker = new Worker('./score-worker.js?v=5', {type:'module'});
     worker.onmessage = ({data}) => {
       if (data.id !== id || id !== pendingId) return;
-      if (data.type === 'progress') {
-        get('summary').textContent = data.message;
-      } else if (data.type === 'error') {
-        stopWorker();
-        get('summary').textContent = '分析未完成。' + data.message;
-      } else if (data.type === 'result') {
-        try {
-          renderResult(data.result, sentences);
+      try {
+        if (data.type === 'whole') {
+          renderWhole(data.result?.score);
+          if (sentences) {
+            get('sentenceResults').hidden = false;
+            get('cancel').textContent = '停止逐句检测';
+            get('summary').textContent = '正在逐句检测…';
+          }
+        } else if (data.type === 'sentence') {
+          const {index,row} = data;
+          if (!Number.isInteger(index) || !sentences || index < 0 || index >= sentences.length || completed.has(index) ||
+              row?.text !== sentences[index] || !validScore(row?.score)) {
+            throw new Error('逐句结果与原文不匹配。');
+          }
+          appendMatch(row, index);
+          completed.add(index);
+          get('summary').textContent = '已检查 ' + completed.size + ' / ' + sentences.length + ' 句';
+        } else if (data.type === 'progress') {
+          if (get('verdict').hidden) get('summary').textContent = data.message;
+        } else if (data.type === 'error') {
+          throw new Error(data.message);
+        } else if (data.type === 'done') {
+          if (get('verdict').hidden || (sentences && completed.size !== sentences.length)) {
+            throw new Error('未收到完整的检测结果。');
+          }
+          if (sentences) {
+            get('sentenceResults').hidden = false;
+            get('sentenceEmpty').hidden = get('sentenceList').childElementCount > 0;
+          }
+          get('summary').textContent = '';
           busy(false);
-        } catch (error) {
-          stopWorker();
-          get('summary').textContent = error.message;
         }
+      } catch (error) {
+        stopWorker();
+        get('summary').textContent = (get('verdict').hidden ? '分析未完成。' : '逐句检测未完成。') + error.message;
       }
     };
     worker.onerror = () => {
