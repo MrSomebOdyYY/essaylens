@@ -69,18 +69,42 @@ async function loadModel(notify) {
   return {handle, tokenizer};
 }
 
-export async function scoreEssay(text, notify = () => {}) {
+function checkedSentences(text, sentences) {
+  if (!Array.isArray(sentences) || !sentences.length || sentences.length > text.length) {
+    throw new Error('句子列表无效。');
+  }
+  let cursor = 0;
+  const pieces = [];
+  for (const sentence of sentences) {
+    if (typeof sentence !== 'string') throw new Error('句子格式无效。');
+    const piece = sentence.trim();
+    while (cursor < text.length && /\s/u.test(text[cursor])) cursor++;
+    if (!piece || !text.startsWith(piece, cursor)) throw new Error('句子顺序与原文不符。');
+    pieces.push(piece);
+    cursor += piece.length;
+  }
+  if (text.slice(cursor).trim()) throw new Error('句子列表未覆盖全部原文。');
+  return pieces;
+}
+
+export async function scoreEssay(text, notify = () => {}, sentences) {
   if (typeof text !== 'string' || !/[A-Za-z]/.test(text) || text.length > 60000) {
     throw new Error('请输入英文文本，最多 60,000 个字符。');
   }
+  const sentenceMode = sentences !== undefined;
+  const parts = sentenceMode ? checkedSentences(text, sentences)
+    : text.split(/\r\n|[\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]/u).map(line=>line.trim()).filter(Boolean);
   if (!loading) loading = loadModel(notify).catch(error => { loading = undefined; throw error; });
   const {handle, tokenizer} = await loading;
-  const lines = text.split(/\r\n|[\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]/u).map(line=>line.trim()).filter(Boolean);
-  const distinct = [text, ...new Set(lines.filter(line=>line!==text.trim()))];
+  const wholeKey = sentenceMode ? text : text.trim();
+  const distinct = [text, ...new Set(parts.filter(part=>part !== wholeKey))];
   const {classifyMany} = await import('./score-staged.js');
   const results = await classifyMany(distinct,tokenizer,handle,notify);
-  const byText = new Map(distinct.map((line,i)=>[line.trim(),results[i]]));
-  const paragraphs = lines.map(line=>({text:line,words:line.split(/\s+/u).length,score:byText.get(line).score}));
+  const byText = new Map(distinct.map((part,i)=>[i === 0 ? wholeKey : part, results[i].score]));
+  if (sentenceMode) {
+    return {...results[0], sentences: parts.map(part=>({text:part, score:byText.get(part)}))};
+  }
+  const paragraphs = parts.map(line=>({text:line,words:line.split(/\s+/u).length,score:byText.get(line)}));
   const total_words = paragraphs.reduce((total,p)=>total+p.words,0);
   const flagged_words = paragraphs.reduce((total,p)=>total+(p.score>=threshold?p.words:0),0);
   return {...results[0],paragraph_analysis:{

@@ -12,160 +12,75 @@ header{border-bottom:1px solid #ccd2c9;display:flex;align-items:center;justify-c
 .brand{font:bold 28px Georgia}
 footer{border-top:1px solid #ccd2c9;color:#52665e;font-size:.9rem}
 footer a{color:inherit}
-#loadHint{display:block;margin:14px 0 12px}
+#loadHint{display:block;margin:4px 0 12px}
 #cancel{color:#224e41;background:transparent;border:1px solid #7c948b}
 .actions{display:flex;gap:8px}
 h1{font:clamp(43px,7vw,80px)/1 Georgia;margin:36px 0 12px;letter-spacing:-.055em}
 h2{margin:0;font-size:20px}
 p{margin:8px 0 20px}
-.grid{display:grid;grid-template-columns:3fr 2fr;gap:20px}
-section,details{background:#fffefa;border:1px solid #d4d9cf;padding:24px;border-radius:12px}
-aside{background:#173e35;color:#fff;border-radius:12px;padding:26px}
-aside p{color:#caddce}
-small,.muted{color:#52665e}
+.grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:20px}
+.grid{align-items:start}
+section,aside{background:#fffefa;border:1px solid #d4d9cf;padding:24px;border-radius:12px}
+aside{background:#173e35;color:#fff;border-color:#173e35}
+aside p{color:#d1e1d6}
+small{color:#52665e}
 .row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
-textarea{resize:vertical;width:100%;height:290px;margin:12px 0;border:1px solid #becac0;border-radius:7px;padding:14px;font:17px/1.65 Georgia;background:#fff}
+textarea{resize:vertical;width:100%;height:290px;margin:12px 0;border:1px solid #becac0;border-radius:7px;padding:14px;font:17px/1.65 Georgia,serif;background:#fff}
 button{cursor:pointer;font:inherit;background:#224e41;color:white;border:0;border-radius:6px;padding:8px 18px}
 button:disabled{opacity:.55;cursor:wait}
 .example{background:transparent;color:#285b48;text-decoration:underline;padding:4px}
-#score{display:block;font:64px Georgia;color:#d8eeac;margin:20px 0}
-#paragraphResults,#detail{margin-top:20px}
-#estimatedShare{font:40px Georgia,serif;line-height:1.15;color:#254f42}
-#coverageInfo{margin:12px 0 4px}
-#paragraphRule{margin:4px 0 20px;font-size:.93rem}
-#paragraphList{padding:0;list-style:none}
-#paragraphList li{margin-top:12px;padding:14px 16px;border-radius:6px;border:1px solid #dce2d9}
-#paragraphList li.flagged{background:#fff4cf;border-color:#dcc47b;border-left:5px solid #a97918}
-.paragraphText{margin:9px 0 0;font:17px/1.65 Georgia,serif;overflow-wrap:anywhere}
-.paragraphStatus{font-size:.92rem}
-.flagged .paragraphStatus{color:#694904;font-weight:650}
-summary{cursor:pointer;font-weight:650}
-#lines li{padding:10px 0;border-bottom:1px solid #ddd}
-#lines small{display:block}
-mark{background:#fae7a7;color:inherit}
+#score{display:block;font:64px Georgia,serif;color:#d8eeac;margin:12px 0}
+#summary:empty{display:none}
+.scoreNote{margin:14px 0 0;font-size:.9rem}
+#sentenceResults{border-top:1px solid #57786c;margin-top:20px;padding-top:18px}
+#sentenceResults h3{font-size:1.05rem;margin:0}
+#sentenceList{list-style:none;padding:0;margin:12px 0 0}
+#sentenceList li{border-left:3px solid #c2d99b;background:#224a3f;padding:9px 12px;margin-top:8px;font:17px/1.55 Georgia,serif;overflow-wrap:anywhere;white-space:pre-wrap}
+#sentenceEmpty{margin:8px 0 0}
 [hidden]{display:none!important}
-@media(max-width:720px){.grid{grid-template-columns:1fr}main{padding:15px}section,details,aside{padding:18px}}
+@media(max-width:720px){.grid{grid-template-columns:1fr}main{padding:15px}section,aside{padding:18px}}
 </style>
 </head>
 <body>
-<header><b class="brand">EssayLens</b><small>浏览器本地分析</small></header>
+<header><b class="brand">EssayLens</b><small>浏览器本地分析 · 作文无需上传</small></header>
 <main>
 <h1>Essay analysis</h1>
-<p>用 Desklib v1.01 分析英文作文，查看全文及各段的 AI 写作倾向。</p>
+<p>粘贴英文作文或短句，查看 AI率和模型标出的原句。</p>
 <div class="grid">
   <section>
     <div class="row"><label for="essay"><strong>英文作文</strong></label><button class="example" id="sample">填入示例</button></div>
-    <textarea spellcheck="false" maxlength="60000" id="essay" placeholder="Paste your essay here…" aria-describedby="inputHint"></textarea>
-    <small id="inputHint">短段也可单独提交。多段作文请保留自然段换行。</small>
-    <small id="loadHint">首次分析会下载约 1.74 GB 的模型。请预留至少 2 GB 浏览器存储空间，建议使用新版桌面 Edge 或 Chrome。模型会缓存在本机供再次使用。</small>
+    <textarea spellcheck="false" maxlength="60000" id="essay" placeholder="Paste your essay here…"></textarea>
+    <small id="loadHint">首次分析会下载约 1.74 GB 的模型。请预留至少 2 GB 浏览器存储空间，建议使用新版桌面 Edge 或 Chrome。下载后可重复使用。</small>
     <div class="row"><small id="count"></small><div class="actions"><button id="cancel" hidden>停止</button><button id="run">分析作文</button></div></div>
   </section>
-  <aside aria-live="polite">
-    <h2>全文 AI 写作倾向评分</h2><output id="score">—</output><p id="summary"></p><hr>
-    <p>全文高分提示线为 <strong id="threshold"></strong>。模型分数不能换算成 AI 撰写的字数比例。</p>
+  <aside aria-labelledby="scoreTitle">
+    <h2 id="scoreTitle">AI率</h2>
+    <output id="score" aria-labelledby="scoreTitle">—</output>
+    <p id="summary" role="status"></p>
+    <div id="sentenceResults" hidden>
+      <h3>更像 AI 写的句子</h3>
+      <ul id="sentenceList" lang="en"></ul>
+      <p id="sentenceEmpty" hidden>没有句子达到 98% 的判定线。</p>
+    </div>
+    <p class="scoreNote">AI率表示模型觉得整篇文章有多像 AI 写的。单句得分达到 98% 就会列出。</p>
   </aside>
 </div>
-<section id="paragraphResults" hidden>
-  <div class="row"><h2>AI 高分段落的词数占比</h2><output id="estimatedShare"></output></div>
-  <p id="coverageInfo"></p>
-  <p class="muted" id="paragraphRule"></p>
-  <details><summary>占比估算的实测误差</summary><p id="shortParagraphBenchmark">在桌面 PyTorch 版的抽测中，8 篇真实合写稿的平均绝对误差为 29.2 个百分点，24 篇同题拼接稿为 5.4 个百分点。这个指标衡量高分段落的词数占比与已知 AI 词数占比相差多少。</p></details>
-  <ol id="paragraphList"></ol>
-</section>
-<details id="detail" hidden>
-  <summary>逐句文风提示</summary>
-  <p>检查固定衔接语和重复的前三个词。以下标记只用于文风反馈。</p>
-  <ol id="lines"></ol>
-</details>
 </main>
 <footer class="row"><span>由 OpenAI Codex 制作</span><span>检测模型 · <a href="https://huggingface.co/desklib/ai-text-detector-v1.01">Desklib v1.01</a></span></footer>
 <script>
 const get = id => document.getElementById(id);
-const words = text => text.toLowerCase().match(/[a-z]+(?:['’-][a-z]+)*/g) || [];
-const defaultThreshold = 0.98;
 const input = get('essay');
-get('threshold').textContent = (defaultThreshold * 100) + '%';
-const percent = fraction => (100 * fraction).toFixed(1) + '%';
-
-function scoreText(score, threshold) {
-  if (score < threshold && percent(score) === percent(threshold)) return '<' + percent(threshold);
-  return percent(score);
-}
+const words = text => text.match(/[a-z]+(?:['’-][a-z]+)*/gi) || [];
+const threshold = 0.98;
 
 function reset() {
   get('count').textContent = words(input.value).length + ' 个英文单词';
-  get('paragraphResults').hidden = true;
-  get('paragraphList').replaceChildren();
-  get('detail').hidden = true;
-  get('detail').open = false;
-  get('lines').replaceChildren();
   get('score').textContent = '—';
-  get('summary').textContent = '可先粘贴一段英文。全文评分需要至少 50 个英文单词和 3 个句子。';
+  get('summary').textContent = '';
+  get('sentenceResults').hidden = true;
+  get('sentenceList').replaceChildren();
+  get('sentenceEmpty').hidden = true;
 }
-input.oninput = reset;
-get('sample').onclick = () => {
-  if (input.value.trim() && !confirm('用示例替换当前作文？')) return;
-  input.value = 'In my neighborhood, the last evening bus leaves before the library closes. In my neighborhood, that single hour determines who can stay for the free classes. On Tuesday I watched two students pack their books halfway through a lesson and run for the stop. In conclusion, moving the final departure back by an hour would let both students finish class and still get home.\n\nThe timetable alone cannot tell the council how many students would take a later bus. I would start with a Thursday trial and ask the librarian to keep a count of the people who stay until closing. After four Thursdays, the council could compare those numbers with the fares collected on the extra run before deciding whether to keep it.\n\nEven a short trial would give the students a chance to be heard.';
-  reset();
-};
-
-function renderStyleNotes(sentences) {
-  const starts = sentences.map(sentence => words(sentence).slice(0,3).join(' '));
-  const counts = new Map();
-  for (const start of starts) counts.set(start, (counts.get(start) || 0) + 1);
-  const fragment = document.createDocumentFragment();
-  sentences.forEach((sentence, i) => {
-    const reasons = [];
-    const phrase = sentence.match(/^(in conclusion|furthermore|moreover|it is important to note that|in today's world)\b/i);
-    if (phrase) reasons.push('固定衔接语 “' + phrase[0] + '”');
-    const start = starts[i];
-    if (start.split(' ').length === 3 && counts.get(start) > 1) {
-      reasons.push('相同开头 “' + start + '” 出现 ' + counts.get(start) + ' 次');
-    }
-    const li = document.createElement('li');
-    const span = document.createElement(reasons.length ? 'mark' : 'span');
-    span.textContent = sentence;
-    const note = document.createElement('small');
-    note.textContent = reasons.join(' · ') || '未命中规则';
-    li.append(span,note);
-    fragment.append(li);
-  });
-  get('lines').replaceChildren(fragment);
-  get('detail').hidden = false;
-}
-
-function renderParagraphs(analysis) {
-  const {paragraphs, threshold, flagged_words, total_words} = analysis;
-  get('estimatedShare').textContent = percent(analysis.flagged_fraction);
-  get('coverageInfo').textContent = '全文 ' + total_words + ' 词，' + paragraphs.length + ' 个段落均已评分，其中高分段落共 ' + flagged_words + ' 词。';
-  get('paragraphRule').textContent = '按原文换行分段。达到 ' + (threshold * 100) + '% 的段落以黄色标出，该段全部词数计入占比。不足 50 词的段落标为短段，可供判断的上下文较少。';
-  const fragment = document.createDocumentFragment();
-  paragraphs.forEach((part, i) => {
-    const li = document.createElement('li');
-    const label = document.createElement('strong');
-    label.textContent = '第 ' + (i + 1) + ' 段 · ' + part.words + ' 词';
-    const status = document.createElement('span');
-    status.className = 'paragraphStatus';
-    const flagged = part.score >= threshold;
-    if (flagged) li.className = 'flagged';
-    const shortLabel = part.words < 50 ? '短段 · ' : '';
-    status.textContent = shortLabel + scoreText(part.score, threshold) + (flagged ? ' · AI 高分' : ' · 低于提示线');
-    const row = document.createElement('div');
-    row.className = 'row';
-    row.append(label,status);
-    const text = document.createElement('p');
-    text.className = 'paragraphText';
-    text.lang = 'en';
-    text.textContent = part.text;
-    li.append(row,text);
-    fragment.append(li);
-  });
-  get('paragraphList').replaceChildren(fragment);
-  get('paragraphResults').hidden = false;
-}
-
-let worker;
-let pendingId = 0;
 
 function busy(value) {
   get('run').disabled = value;
@@ -174,9 +89,54 @@ function busy(value) {
   get('cancel').hidden = !value;
 }
 
+function submittedSentences(text) {
+  if (!words(text).length) {
+    get('summary').textContent = '请至少输入一个英文单词。';
+    return [];
+  }
+  if (typeof Intl.Segmenter !== 'function') {
+    get('summary').textContent = '请使用支持英文分句的新版浏览器。';
+    return [];
+  }
+  const segmenter = new Intl.Segmenter('en', {granularity:'sentence'});
+  return Array.from(segmenter.segment(text), item => item.segment.trim()).filter(Boolean);
+}
+
+function renderResult(result, sentences) {
+  const validScore = score => Number.isFinite(score) && score >= 0 && score <= 1;
+  if (!validScore(result?.score) || !Array.isArray(result.sentences)
+      || result.sentences.length !== sentences.length
+      || !result.sentences.every((entry, index) => entry?.text === sentences[index] && validScore(entry.score))) {
+    throw new Error('未收到完整的逐句检测结果。请刷新到最新版后重试。');
+  }
+  const rounded = (100 * result.score).toFixed(1) + '%';
+  get('score').textContent = result.score < threshold && rounded === '98.0%' ? '<98.0%' : rounded;
+  const list = document.createDocumentFragment();
+  for (const {text, score} of result.sentences) {
+    if (score < threshold || !/[A-Za-z]/.test(text)) continue;
+    const item = document.createElement('li');
+    item.textContent = text;
+    list.append(item);
+  }
+  get('sentenceEmpty').hidden = list.childElementCount > 0;
+  get('sentenceList').replaceChildren(list);
+  get('sentenceResults').hidden = false;
+  get('summary').textContent = '';
+}
+
+input.oninput = reset;
+get('sample').onclick = () => {
+  if (input.value.trim() && !confirm('用示例替换当前作文？')) return;
+  input.value = 'In my neighborhood, the last evening bus leaves before the library closes. In my neighborhood, that single hour determines who can stay for the free classes. On Tuesday I watched two students pack their books halfway through a lesson and run for the stop. In conclusion, moving the final departure back by an hour would let both students finish class and still get home.\n\nThe timetable alone cannot tell the council how many students would take a later bus. I would start with a Thursday trial and ask the librarian to keep a count of the people who stay until closing. After four Thursdays, the council could compare those numbers with the fares collected on the extra run before deciding whether to keep it.\n\nEven a short trial would give the students a chance to be heard.';
+  reset();
+};
+
+let worker;
+let pendingId = 0;
+
 function stopWorker() {
   pendingId++;
-  if (worker) worker.terminate();
+  worker?.terminate();
   worker = undefined;
   busy(false);
 }
@@ -188,15 +148,9 @@ get('cancel').onclick = () => {
 
 get('run').onclick = () => {
   reset();
-  const submitted = input.value;
-  const wordCount = words(submitted).length;
-  if (!wordCount) {
-    get('summary').textContent = '请至少输入一个英文单词。';
-    return;
-  }
-  const sentences = Array.from(new Intl.Segmenter('en', {granularity:'sentence'}).segment(submitted), item => item.segment.trim()).filter(sentence => words(sentence).length);
-  const wholeEligible = wordCount >= 50 && sentences.length >= 3;
-  renderStyleNotes(sentences);
+  const text = input.value;
+  const sentences = submittedSentences(text);
+  if (!sentences.length) return;
   if (location.protocol === 'file:') {
     get('summary').textContent = '请通过网站地址打开 EssayLens，以启用浏览器模型。';
     return;
@@ -209,7 +163,7 @@ get('run').onclick = () => {
   busy(true);
   get('summary').textContent = '正在准备浏览器内的检测模型…';
   try {
-    if (!worker) worker = new Worker('./score-worker.js?v=3', {type:'module'});
+    if (!worker) worker = new Worker('./score-worker.js?v=4', {type:'module'});
     worker.onmessage = ({data}) => {
       if (data.id !== id || id !== pendingId) return;
       if (data.type === 'progress') {
@@ -218,16 +172,13 @@ get('run').onclick = () => {
         stopWorker();
         get('summary').textContent = '分析未完成。' + data.message;
       } else if (data.type === 'result') {
-        const result = data.result;
-        renderParagraphs(result.paragraph_analysis);
-        if (wholeEligible) {
-          get('score').textContent = scoreText(result.score, defaultThreshold);
-          const verdict = result.score >= defaultThreshold ? '达到 AI 高分提示线。' : '低于 AI 高分提示线。';
-          get('summary').textContent = verdict + (result.chunks === 1 ? '模型对全文给出的 AI 写作类别分数。' : '长文分为 ' + result.chunks + ' 个文本块推理，按各块 token 数加权平均。');
-        } else {
-          get('summary').textContent = '已完成分段检测。全文评分需要至少 50 个英文单词和 3 个句子。';
+        try {
+          renderResult(data.result, sentences);
+          busy(false);
+        } catch (error) {
+          stopWorker();
+          get('summary').textContent = error.message;
         }
-        busy(false);
       }
     };
     worker.onerror = () => {
@@ -235,7 +186,7 @@ get('run').onclick = () => {
       stopWorker();
       get('summary').textContent = '模型未能加载。请使用桌面浏览器，检查网络和可用内存后重试。';
     };
-    worker.postMessage({type:'score', id, text:submitted});
+    worker.postMessage({type:'score', id, text, sentences});
   } catch {
     stopWorker();
     get('summary').textContent = '无法启动模型。请使用支持 Web Worker 的桌面浏览器重试。';
