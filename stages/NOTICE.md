@@ -7,6 +7,12 @@ The ONNX graph fragments and offset table in this directory were derived from th
 
 Both model cards identify the model license as MIT.
 
+## Sentence inference metadata
+
+`layout-v6.json` uses the original first group and three alternate graphs for sentence batches. Each alternate graph includes the original position-table normalization and references the same three tensors in the cached model weights. This lets ONNX Runtime precompute fixed position projections during session setup. The full-essay score and independent checks near the 98% cutoff continue to use the original graphs.
+
+To regenerate the alternate graphs from this directory's original metadata, install the Python package `onnx` and run `python tools/build_position_stages.py stages` from the repository root. The generator reads no essays and requires no weight download.
+
 ## MIT License
 
 Copyright holders: Desklib and the respective contributors to the model and its ONNX conversion.

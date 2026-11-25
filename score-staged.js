@@ -2,13 +2,34 @@
 // A read-only OPFS sync handle provides just the weights needed by each group.
 import * as ort from 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/ort.wasm.min.mjs';
 
-ort.env.wasm.numThreads = 1;
+const singleThread = globalThis.location && new URL(globalThis.location.href).searchParams.get('threads') === '1';
+ort.env.wasm.numThreads = !singleThread && globalThis.crossOriginIsolated && typeof SharedArrayBuffer === 'function' ? 0 : 1;
 ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.24.3/dist/';
 const graphDir = new URL('./stages/', import.meta.url);
-const layout = fetch(new URL('layout.json', graphDir)).then(response => {
-  if (!response.ok) throw Error('无法加载模型结构。');
-  return response.json();
-});
+const layouts = new Map();
+function loadLayout(name) {
+  if (!layouts.has(name)) {
+    const pending = fetch(new URL(name, graphDir)).then(response => {
+      if (!response.ok) throw Error('无法加载模型结构。');
+      return response.json();
+    }).catch(error => {
+      layouts.delete(name);
+      throw error;
+    });
+    layouts.set(name, pending);
+  }
+  return layouts.get(name);
+}
+
+// Tokenization can stay unchanged after a formatting edit, and a local edit in a
+// long essay often leaves entire chunks intact. Only cache the original graph's
+// scalar outputs, keyed by exact token IDs, for the lifetime of this worker.
+const chunkCache = new Map();
+function rememberChunk(key, denominator) {
+  chunkCache.delete(key);
+  chunkCache.set(key, denominator);
+  if (chunkCache.size > 64) chunkCache.delete(chunkCache.keys().next().value);
+}
 
 function readBytes(handle, target, offset) {
   let n = 0;
@@ -56,23 +77,42 @@ function addEmbeddings(batch, embedding, fh) {
 }
 
 export async function classifyMany(texts, tokenizer, fileHandle, notify, onResult, batchSentences = false) {
-  const {embedding, stages} = await layout;
   const jobs = [];
   const results = texts.map(() => ({score: 0, chunks: 0}));
   const remaining = [];
+  const contributions = [];
+  function finish(index, usedSentenceGraph) {
+    const result = results[index];
+    result.score = contributions[index].reduce((sum, value) => sum + value, 0);
+    onResult?.(index, result, usedSentenceGraph);
+  }
   for (const [index, text] of texts.entries()) {
     const ids = tokenizer(text, {add_special_tokens:false, return_tensor:false}).input_ids;
     if (!ids.length) throw new Error('这段文字无法分词。');
     const chunks = Math.ceil(ids.length / 766);
     results[index].chunks = chunks;
-    remaining[index] = chunks;
+    remaining[index] = 0;
+    contributions[index] = [];
     const width = Math.ceil(ids.length / chunks);
     for (let start = 0; start < ids.length; start += width) {
       const part = ids.slice(start, start + width);
+      const key = part.join(',');
+      const chunk = Math.floor(start / width);
+      const weight = part.length / ids.length;
+      if (chunkCache.has(key)) {
+        const denominator = chunkCache.get(key);
+        rememberChunk(key, denominator);
+        contributions[index][chunk] = weight / denominator;
+        continue;
+      }
       const tokens = [tokenizer.bos_token_id, ...part, tokenizer.sep_token_id];
-      jobs.push({index, weight: part.length / ids.length, tokens});
+      jobs.push({index, chunk, key, weight, tokens});
+      remaining[index]++;
     }
+    if (!remaining[index]) finish(index, false);
   }
+  if (!jobs.length) return results;
+  const {embedding, stages} = await loadLayout(batchSentences ? 'layout-v6.json' : 'layout.json');
   const batches = makeBatches(jobs, batchSentences);
   const fh = await fileHandle.createSyncAccessHandle({mode: 'read-only'});
   const futureInputs = stages.map((_, index) => new Set(stages.slice(index + 1).flatMap(stage => stage.inputs)));
@@ -109,9 +149,10 @@ export async function classifyMany(texts, tokenizer, fileHandle, notify, onResul
               for (const [row, job] of batch.jobs.entries()) {
                 const logit = Number(scope.logits.data[row]);
                 if (!Number.isFinite(logit)) throw new Error('设备返回了无效的模型分数。');
-                const result = results[job.index];
-                result.score += job.weight / (1 + Math.exp(-logit));
-                if (--remaining[job.index] === 0) onResult?.(job.index, result, batch.jobs.length > 1);
+                const denominator = 1 + Math.exp(-logit);
+                if (!batchSentences) rememberChunk(job.key, denominator);
+                contributions[job.index][job.chunk] = job.weight / denominator;
+                if (--remaining[job.index] === 0) finish(job.index, batchSentences);
               }
             }
             for (const key of Object.keys(scope)) {

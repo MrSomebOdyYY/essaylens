@@ -114,7 +114,7 @@ async function scoreTexts(distinct, notify, completed, batchSentences = false) {
   const pending = [];
   for (const text of distinct) {
     const cached = recent.get(text);
-    if (cached && (batchSentences || !cached.batched)) {
+    if (cached && (batchSentences || !cached.usedSentenceGraph)) {
       remember(text, cached);
       byText.set(text, cached.result);
       completed?.(text, cached.result);
@@ -125,19 +125,18 @@ async function scoreTexts(distinct, notify, completed, batchSentences = false) {
   if (!pending.length) return byText;
   if (!loading) loading = loadModel(notify).catch(error => { loading = undefined; throw error; });
   const {handle, tokenizer} = await loading;
-  const {classifyMany} = await import('./score-staged.js?v=5');
+  const {classifyMany} = await import('./score-staged.js?v=6');
   const borderline = [];
-  function record(text, result, batched) {
-    remember(text, {result, batched});
+  function record(text, result, usedSentenceGraph) {
+    remember(text, {result, usedSentenceGraph});
     byText.set(text, result);
     completed?.(text, result);
   }
-  await classifyMany(pending, tokenizer, handle, notify, (index, result, batched) => {
+  await classifyMany(pending, tokenizer, handle, notify, (index, result, usedSentenceGraph) => {
     const text = pending[index];
-    // Recheck very close decisions using the original one-sentence path before
-    // publishing any flag. This also covers rounding differences across devices.
-    if (batched && Math.abs(result.score - threshold) < 0.0001) borderline.push(text);
-    else record(text, result, batched);
+    // Recheck decisions near the threshold using the original scalar graph.
+    if (usedSentenceGraph && Math.abs(result.score - threshold) < 0.0001) borderline.push(text);
+    else record(text, result, usedSentenceGraph);
   }, batchSentences);
   if (borderline.length) {
     await classifyMany(borderline, tokenizer, handle, notify, (index, result) => {

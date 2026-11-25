@@ -35,13 +35,13 @@ button:disabled{opacity:.55;cursor:wait}
 #summary:empty{display:none}
 #verdict{margin:0 0 8px;color:#d8eeac}
 .scoreNote{margin:14px 0 0;font-size:.9rem}
-#sentenceResults{border-top:1px solid #57786c;margin-top:20px;padding-top:18px}
-#sentenceResults h3{font-size:1.05rem;margin:0}
-#sentenceList{list-style:none;padding:0;margin:12px 0 0}
-#sentenceList li{border-left:3px solid #c2d99b;background:#224a3f;padding:9px 12px;margin-top:8px;font:17px/1.55 Georgia,serif;overflow-wrap:anywhere;white-space:pre-wrap}
-#sentenceEmpty{margin:8px 0 0}
+#sentenceResults{margin-top:20px}
+#sentenceList{list-style:none;padding:0;margin:0}
+#sentenceList li{border-left:3px solid #729368;background:#f0f3e9;padding:10px 14px;margin-top:10px;font:17px/1.65 Georgia,serif;overflow-wrap:anywhere;white-space:pre-wrap}
+#sentenceStatus,#sentenceEmpty{margin:6px 0 0;color:#52665e}
+#sentenceStatus:empty{display:none}
 [hidden]{display:none!important}
-@media(max-width:720px){.grid{grid-template-columns:1fr}main{padding:15px}section,aside{padding:18px}}
+@media(max-width:720px){.grid{grid-template-columns:1fr}.grid aside{grid-row:1}main{padding:15px}section,aside{padding:18px}#score{font-size:44px;margin:4px 0}}
 </style>
 </head>
 <body>
@@ -62,14 +62,15 @@ button:disabled{opacity:.55;cursor:wait}
     <output id="score" aria-labelledby="scoreTitle">—</output>
     <p id="verdict" hidden></p>
     <p id="summary" role="status"></p>
-    <div id="sentenceResults" hidden>
-      <h3>更像 AI 写的句子</h3>
-      <ul id="sentenceList" lang="en"></ul>
-      <p id="sentenceEmpty" hidden>没有句子达到 98% 的判定线。</p>
-    </div>
-    <p class="scoreNote">AI率是模型对全文的评分，不能换算成 AI 写了多少字。单句得分达到 98% 就会列出。</p>
+    <p class="scoreNote">AI率是模型对全文的评分，不能换算成 AI 写了多少字。</p>
   </aside>
 </div>
+<section id="sentenceResults" aria-labelledby="sentenceTitle">
+  <h2 id="sentenceTitle">更像 AI 写的句子</h2>
+  <p id="sentenceStatus" role="status"></p>
+  <p id="sentenceEmpty" role="status" hidden>没有句子达到 98% 的判定线。</p>
+  <ol id="sentenceList" lang="en"></ol>
+</section>
 </main>
 <footer class="row"><span>由 OpenAI Codex 制作</span><span>检测模型 · <a href="https://huggingface.co/desklib/ai-text-detector-v1.01">Desklib v1.01</a></span></footer>
 <script>
@@ -83,7 +84,8 @@ function reset() {
   get('score').textContent = '—';
   get('verdict').hidden = true;
   get('summary').textContent = '';
-  get('sentenceResults').hidden = true;
+  get('sentenceResults').hidden = !get('withSentences').checked;
+  get('sentenceStatus').textContent = '分析作文后，单句得分达到 98% 的原句会列在这里。';
   get('sentenceList').replaceChildren();
   get('sentenceEmpty').hidden = true;
 }
@@ -123,6 +125,9 @@ function appendMatch(row, index) {
 }
 
 input.oninput = reset;
+get('withSentences').onchange = () => {
+  get('sentenceResults').hidden = !get('withSentences').checked;
+};
 get('sample').onclick = () => {
   if (input.value.trim() && !confirm('用示例替换当前作文？')) return;
   input.value = 'In my neighborhood, the last evening bus leaves before the library closes. In my neighborhood, that single hour determines who can stay for the free classes. On Tuesday I watched two students pack their books halfway through a lesson and run for the stop. In conclusion, moving the final departure back by an hour would let both students finish class and still get home.\n\nThe timetable alone cannot tell the council how many students would take a later bus. I would start with a Thursday trial and ask the librarian to keep a count of the people who stay until closing. After four Thursdays, the council could compare those numbers with the fares collected on the extra run before deciding whether to keep it.\n\nEven a short trial would give the students a chance to be heard.';
@@ -131,6 +136,7 @@ get('sample').onclick = () => {
 
 let worker;
 let pendingId = 0;
+let useSingleThread = false;
 
 function stopWorker() {
   pendingId++;
@@ -141,10 +147,11 @@ function stopWorker() {
 
 get('cancel').onclick = () => {
   stopWorker();
-  get('summary').textContent = get('verdict').hidden ? '已停止分析。' : '已停止逐句检测，保留已完成的结果。';
+  get('summary').textContent = get('verdict').hidden ? '已停止分析。' : '';
+  if (!get('sentenceResults').hidden) get('sentenceStatus').textContent = '已停止检测。';
 };
 
-get('run').onclick = () => {
+function startAnalysis() {
   reset();
   const text = input.value;
   if (!words(text).length) {
@@ -172,17 +179,26 @@ get('run').onclick = () => {
   const completed = new Set();
   busy(true);
   get('summary').textContent = '正在准备浏览器内的检测模型…';
+  if (sentences) get('sentenceStatus').textContent = '正在准备逐句检测…';
+  function retryWithoutThreads(message) {
+    if (useSingleThread || !window.crossOriginIsolated || !get('verdict').hidden ||
+        !/thread|sharedarraybuffer|atomics|worker|no available backend|wasm.*(abort|initiali)/i.test(message || '')) return false;
+    useSingleThread = true;
+    stopWorker();
+    startAnalysis();
+    return true;
+  }
   try {
-    if (!worker) worker = new Worker('./score-worker.js?v=5', {type:'module'});
+    if (!worker) worker = new Worker('./score-worker.js?v=6' + (useSingleThread ? '&threads=1' : ''), {type:'module'});
     worker.onmessage = ({data}) => {
       if (data.id !== id || id !== pendingId) return;
       try {
         if (data.type === 'whole') {
           renderWhole(data.result?.score);
+          get('summary').textContent = '';
           if (sentences) {
-            get('sentenceResults').hidden = false;
             get('cancel').textContent = '停止逐句检测';
-            get('summary').textContent = '正在逐句检测…';
+            get('sentenceStatus').textContent = '正在逐句检测…';
           }
         } else if (data.type === 'sentence') {
           const {index,row} = data;
@@ -192,39 +208,47 @@ get('run').onclick = () => {
           }
           appendMatch(row, index);
           completed.add(index);
-          get('summary').textContent = '已检查 ' + completed.size + ' / ' + sentences.length + ' 句';
+          get('sentenceStatus').textContent = '已检查 ' + completed.size + ' / ' + sentences.length + ' 句';
         } else if (data.type === 'progress') {
           if (get('verdict').hidden) get('summary').textContent = data.message;
         } else if (data.type === 'error') {
+          if (retryWithoutThreads(data.message)) return;
           throw new Error(data.message);
         } else if (data.type === 'done') {
           if (get('verdict').hidden || (sentences && completed.size !== sentences.length)) {
             throw new Error('未收到完整的检测结果。');
           }
           if (sentences) {
-            get('sentenceResults').hidden = false;
-            get('sentenceEmpty').hidden = get('sentenceList').childElementCount > 0;
+            const matches = get('sentenceList').childElementCount;
+            get('sentenceEmpty').hidden = matches > 0;
+            get('sentenceStatus').textContent = matches ? '共标出 ' + matches + ' 处。' : '';
           }
           get('summary').textContent = '';
           busy(false);
         }
       } catch (error) {
         stopWorker();
-        get('summary').textContent = (get('verdict').hidden ? '分析未完成。' : '逐句检测未完成。') + error.message;
+        get('summary').textContent = get('verdict').hidden ? '分析未完成。' + error.message : '';
+        if (sentences) get('sentenceStatus').textContent = get('verdict').hidden ? '未完成逐句检测。' : '逐句检测未完成。' + error.message;
       }
     };
-    worker.onerror = () => {
+    worker.onerror = event => {
       if (id !== pendingId) return;
+      if (retryWithoutThreads(event.message)) return;
       stopWorker();
       get('summary').textContent = '模型未能加载。请使用桌面浏览器，检查网络和可用内存后重试。';
+      if (sentences) get('sentenceStatus').textContent = '未完成逐句检测。';
     };
     worker.postMessage({type:'score', id, text, sentences});
   } catch {
     stopWorker();
     get('summary').textContent = '无法启动模型。请使用支持 Web Worker 的桌面浏览器重试。';
+    if (sentences) get('sentenceStatus').textContent = '未完成逐句检测。';
   }
-};
+}
+get('run').onclick = startAnalysis;
 reset();
 </script>
+<script type="module" src="./enable-parallel.js?v=6"></script>
 </body>
 </html>
