@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EssayLens · 英文写作分析</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f6f5ef;color:#213b35;font:16px/1.6 "DM Sans",system-ui,sans-serif}
+header,main,footer{max-width:1080px;margin:auto;padding:22px}
+header{border-bottom:1px solid #ccd2c9;display:flex;align-items:center;justify-content:space-between}
+.brand{font:bold 28px Georgia}
+footer{border-top:1px solid #ccd2c9;color:#52665e;font-size:.9rem}
+footer a{color:inherit}
+#loadHint{display:block;margin:14px 0 12px}
+#cancel{color:#224e41;background:transparent;border:1px solid #7c948b}
+.actions{display:flex;gap:8px}
+h1{font:clamp(43px,7vw,80px)/1 Georgia;margin:36px 0 12px;letter-spacing:-.055em}
+h2{margin:0;font-size:20px}
+p{margin:8px 0 20px}
+.grid{display:grid;grid-template-columns:3fr 2fr;gap:20px}
+section,details{background:#fffefa;border:1px solid #d4d9cf;padding:24px;border-radius:12px}
+aside{background:#173e35;color:#fff;border-radius:12px;padding:26px}
+aside p{color:#caddce}
+small,.muted{color:#52665e}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+textarea{resize:vertical;width:100%;height:290px;margin:12px 0;border:1px solid #becac0;border-radius:7px;padding:14px;font:17px/1.65 Georgia;background:#fff}
+button{cursor:pointer;font:inherit;background:#224e41;color:white;border:0;border-radius:6px;padding:8px 18px}
+button:disabled{opacity:.55;cursor:wait}
+.example{background:transparent;color:#285b48;text-decoration:underline;padding:4px}
+#score{display:block;font:64px Georgia;color:#d8eeac;margin:20px 0}
+#paragraphResults,#detail{margin-top:20px}
+#estimatedShare{font:40px Georgia,serif;line-height:1.15;color:#254f42}
+#coverageInfo{margin:12px 0 4px}
+#paragraphRule{margin:4px 0 20px;font-size:.93rem}
+#paragraphList{padding:0;list-style:none}
+#paragraphList li{margin-top:12px;padding:14px 16px;border-radius:6px;border:1px solid #dce2d9}
+#paragraphList li.flagged{background:#fff4cf;border-color:#dcc47b;border-left:5px solid #a97918}
+.paragraphText{margin:9px 0 0;font:17px/1.65 Georgia,serif;overflow-wrap:anywhere}
+.paragraphStatus{font-size:.92rem}
+.flagged .paragraphStatus{color:#694904;font-weight:650}
+summary{cursor:pointer;font-weight:650}
+#lines li{padding:10px 0;border-bottom:1px solid #ddd}
+#lines small{display:block}
+mark{background:#fae7a7;color:inherit}
+[hidden]{display:none!important}
+@media(max-width:720px){.grid{grid-template-columns:1fr}main{padding:15px}section,details,aside{padding:18px}}
+</style>
+</head>
+<body>
+<header><b class="brand">EssayLens</b><small>浏览器本地分析</small></header>
+<main>
+<h1>Essay analysis</h1>
+<p>用 Desklib v1.01 分析英文作文，查看全文及各段的 AI 写作倾向。</p>
+<div class="grid">
+  <section>
+    <div class="row"><label for="essay"><strong>英文作文</strong></label><button class="example" id="sample">填入示例</button></div>
+    <textarea spellcheck="false" maxlength="60000" id="essay" placeholder="Paste your essay here…" aria-describedby="inputHint"></textarea>
+    <small id="inputHint">短段也可单独提交。多段作文请保留自然段换行。</small>
+    <small id="loadHint">首次分析会下载约 1.74 GB 的模型。模型需要 WebGPU，建议使用具备数 GB 可用内存的桌面电脑。手机可能因内存不足而无法运行。</small>
+    <div class="row"><small id="count"></small><div class="actions"><button id="cancel" hidden>停止</button><button id="run">分析作文</button></div></div>
+  </section>
+  <aside aria-live="polite">
+    <h2>全文 AI 写作倾向评分</h2><output id="score">—</output><p id="summary"></p><hr>
+    <p>全文高分提示线为 <strong id="threshold"></strong>。模型分数不能换算成 AI 撰写的字数比例。</p>
+  </aside>
+</div>
+<section id="paragraphResults" hidden>
+  <div class="row"><h2>AI 高分段落的词数占比</h2><output id="estimatedShare"></output></div>
+  <p id="coverageInfo"></p>
+  <p class="muted" id="paragraphRule"></p>
+  <details><summary>占比估算的实测误差</summary><p id="shortParagraphBenchmark">在桌面 PyTorch 版的抽测中，8 篇真实合写稿的平均绝对误差为 29.2 个百分点，24 篇同题拼接稿为 5.4 个百分点。这个指标衡量高分段落的词数占比与已知 AI 词数占比相差多少。</p></details>
+  <ol id="paragraphList"></ol>
+</section>
+<details id="detail" hidden>
+  <summary>逐句文风提示</summary>
+  <p>检查固定衔接语和重复的前三个词。以下标记只用于文风反馈。</p>
+  <ol id="lines"></ol>
+</details>
+</main>
+<footer class="row"><span>由 OpenAI Codex 制作</span><span>检测模型 · <a href="https://huggingface.co/desklib/ai-text-detector-v1.01">Desklib v1.01</a></span></footer>
+<script>
+const get = id => document.getElementById(id);
+const words = text => text.toLowerCase().match(/[a-z]+(?:['’-][a-z]+)*/g) || [];
+const defaultThreshold = 0.98;
+const input = get('essay');
+get('threshold').textContent = (defaultThreshold * 100) + '%';
+const percent = fraction => (100 * fraction).toFixed(1) + '%';
+
+function scoreText(score, threshold) {
+  if (score < threshold && percent(score) === percent(threshold)) return '<' + percent(threshold);
+  return percent(score);
+}
+
+function reset() {
+  get('count').textContent = words(input.value).length + ' 个英文单词';
+  get('paragraphResults').hidden = true;
+  get('paragraphList').replaceChildren();
+  get('detail').hidden = true;
+  get('detail').open = false;
+  get('lines').replaceChildren();
+  get('score').textContent = '—';
+  get('summary').textContent = '可先粘贴一段英文。全文评分需要至少 50 个英文单词和 3 个句子。';
+}
+input.oninput = reset;
+get('sample').onclick = () => {
+  if (input.value.trim() && !confirm('用示例替换当前作文？')) return;
+  input.value = 'In my neighborhood, the last evening bus leaves before the library closes. In my neighborhood, that single hour determines who can stay for the free classes. On Tuesday I watched two students pack their books halfway through a lesson and run for the stop. In conclusion, moving the final departure back by an hour would let both students finish class and still get home.\n\nThe timetable alone cannot tell the council how many students would take a later bus. I would start with a Thursday trial and ask the librarian to keep a count of the people who stay until closing. After four Thursdays, the council could compare those numbers with the fares collected on the extra run before deciding whether to keep it.\n\nEven a short trial would give the students a chance to be heard.';
+  reset();
+};
+
+function renderStyleNotes(sentences) {
+  const starts = sentences.map(sentence => words(sentence).slice(0,3).join(' '));
+  const counts = new Map();
+  for (const start of starts) counts.set(start, (counts.get(start) || 0) + 1);
+  const fragment = document.createDocumentFragment();
+  sentences.forEach((sentence, i) => {
+    const reasons = [];
+    const phrase = sentence.match(/^(in conclusion|furthermore|moreover|it is important to note that|in today's world)\b/i);
+    if (phrase) reasons.push('固定衔接语 “' + phrase[0] + '”');
+    const start = starts[i];
+    if (start.split(' ').length === 3 && counts.get(start) > 1) {
+      reasons.push('相同开头 “' + start + '” 出现 ' + counts.get(start) + ' 次');
+    }
+    const li = document.createElement('li');
+    const span = document.createElement(reasons.length ? 'mark' : 'span');
+    span.textContent = sentence;
+    const note = document.createElement('small');
+    note.textContent = reasons.join(' · ') || '未命中规则';
+    li.append(span,note);
+    fragment.append(li);
+  });
+  get('lines').replaceChildren(fragment);
+  get('detail').hidden = false;
+}
+
+function renderParagraphs(analysis) {
+  const {paragraphs, threshold, flagged_words, total_words} = analysis;
+  get('estimatedShare').textContent = percent(analysis.flagged_fraction);
+  get('coverageInfo').textContent = '全文 ' + total_words + ' 词，' + paragraphs.length + ' 个段落均已评分，其中高分段落共 ' + flagged_words + ' 词。';
+  get('paragraphRule').textContent = '按原文换行分段。达到 ' + (threshold * 100) + '% 的段落以黄色标出，该段全部词数计入占比。不足 50 词的段落标为短段，可供判断的上下文较少。';
+  const fragment = document.createDocumentFragment();
+  paragraphs.forEach((part, i) => {
+    const li = document.createElement('li');
+    const label = document.createElement('strong');
+    label.textContent = '第 ' + (i + 1) + ' 段 · ' + part.words + ' 词';
+    const status = document.createElement('span');
+    status.className = 'paragraphStatus';
+    const flagged = part.score >= threshold;
+    if (flagged) li.className = 'flagged';
+    const shortLabel = part.words < 50 ? '短段 · ' : '';
+    status.textContent = shortLabel + scoreText(part.score, threshold) + (flagged ? ' · AI 高分' : ' · 低于提示线');
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.append(label,status);
+    const text = document.createElement('p');
+    text.className = 'paragraphText';
+    text.lang = 'en';
+    text.textContent = part.text;
+    li.append(row,text);
+    fragment.append(li);
+  });
+  get('paragraphList').replaceChildren(fragment);
+  get('paragraphResults').hidden = false;
+}
+
+let worker;
+let pendingId = 0;
+
+function busy(value) {
+  get('run').disabled = value;
+  get('sample').disabled = value;
+  input.readOnly = value;
+  get('cancel').hidden = !value;
+}
+
+function stopWorker() {
+  pendingId++;
+  if (worker) worker.terminate();
+  worker = undefined;
+  busy(false);
+}
+
+get('cancel').onclick = () => {
+  stopWorker();
+  get('summary').textContent = '已停止分析。';
+};
+
+get('run').onclick = () => {
+  reset();
+  const submitted = input.value;
+  const wordCount = words(submitted).length;
+  if (!wordCount) {
+    get('summary').textContent = '请至少输入一个英文单词。';
+    return;
+  }
+  const sentences = Array.from(new Intl.Segmenter('en', {granularity:'sentence'}).segment(submitted), item => item.segment.trim()).filter(sentence => words(sentence).length);
+  const wholeEligible = wordCount >= 50 && sentences.length >= 3;
+  renderStyleNotes(sentences);
+  if (location.protocol === 'file:') {
+    get('summary').textContent = '请通过网站地址打开 EssayLens，以启用浏览器模型。';
+    return;
+  }
+  if (!navigator.gpu) {
+    get('summary').textContent = '检测需要 WebGPU。请使用支持 WebGPU 的桌面浏览器，并启用图形加速。';
+    return;
+  }
+  const id = ++pendingId;
+  busy(true);
+  get('summary').textContent = '正在准备浏览器内的检测模型…';
+  try {
+    if (!worker) worker = new Worker('./score-worker.js', {type:'module'});
+    worker.onmessage = ({data}) => {
+      if (data.id !== id || id !== pendingId) return;
+      if (data.type === 'progress') {
+        get('summary').textContent = data.message;
+      } else if (data.type === 'error') {
+        stopWorker();
+        get('summary').textContent = '分析未完成。' + data.message;
+      } else if (data.type === 'result') {
+        const result = data.result;
+        renderParagraphs(result.paragraph_analysis);
+        if (wholeEligible) {
+          get('score').textContent = scoreText(result.score, defaultThreshold);
+          const verdict = result.score >= defaultThreshold ? '达到 AI 高分提示线。' : '低于 AI 高分提示线。';
+          get('summary').textContent = verdict + (result.chunks === 1 ? '模型对全文给出的 AI 写作类别分数。' : '长文分为 ' + result.chunks + ' 个文本块推理，按各块 token 数加权平均。');
+        } else {
+          get('summary').textContent = '已完成分段检测。全文评分需要至少 50 个英文单词和 3 个句子。';
+        }
+        busy(false);
+      }
+    };
+    worker.onerror = () => {
+      if (id !== pendingId) return;
+      stopWorker();
+      get('summary').textContent = '模型未能加载。请使用桌面浏览器，检查网络和可用内存后重试。';
+    };
+    worker.postMessage({type:'score', id, text:submitted});
+  } catch {
+    stopWorker();
+    get('summary').textContent = '无法启动模型。请使用支持 Web Worker 的桌面浏览器重试。';
+  }
+};
+reset();
+</script>
+</body>
+</html>
