@@ -10,6 +10,53 @@ const chunkTokens = 766;
 env.allowLocalModels = false;
 let loading;
 
+const weightBytes = 1736052736;
+const weightFile = 'model.onnx_data';
+const weightURL = 'https://huggingface.co/' + repository + '/resolve/' + revision + '/onnx/' + weightFile;
+
+// Stream the external weights into private browser storage. This avoids creating
+// an additional 1.74 GB Response/Blob copy to populate the default model cache.
+async function loadWeights(notify) {
+  const root = await navigator.storage.getDirectory();
+  const handle = await root.getFileHandle('essaylens-' + revision + '.weights', {create: true});
+  let file = await handle.getFile();
+  if (file.size !== weightBytes) {
+    const response = await fetch(weightURL);
+    if (!response.ok || !response.body) throw new Error('模型权重下载失败（HTTP ' + response.status + '）。');
+    const writer = await handle.createWritable();
+    let loaded = 0;
+    let lastUpdate = 0;
+    const tracker = new TransformStream({
+      transform(chunk, controller) {
+        loaded += chunk.byteLength;
+        if (Date.now() - lastUpdate > 400) {
+          lastUpdate = Date.now();
+          notify('正在下载权重 · ' + Math.floor(loaded / 1000000) + ' / 1737 MB');
+        }
+        controller.enqueue(chunk);
+      },
+      flush() {
+        if (loaded !== weightBytes) throw new Error('权重下载长度异常，请重试。');
+      },
+    });
+    await response.body.pipeThrough(tracker).pipeTo(writer);
+    file = await handle.getFile();
+    if (file.size !== weightBytes) throw new Error('本机模型缓存写入失败。');
+  }
+  notify('正在从浏览器缓存读取模型权重…');
+  const weights = new Uint8Array(weightBytes);
+  const reader = file.stream().getReader();
+  let offset = 0;
+  while (true) {
+    const {done, value} = await reader.read();
+    if (done) break;
+    weights.set(value, offset);
+    offset += value.byteLength;
+  }
+  if (offset !== weightBytes) throw new Error('本机模型缓存读取失败。');
+  return weights;
+}
+
 async function loadModel(notify) {
   if (!navigator.gpu || !await navigator.gpu.requestAdapter()) {
     throw new Error('这个模型需要 WebGPU。请使用启用了硬件加速的桌面版 Microsoft Edge 或 Chrome。');
@@ -27,8 +74,11 @@ async function loadModel(notify) {
     },
   };
   const tokenizer = await AutoTokenizer.from_pretrained(repository, options);
+  const weights = await loadWeights(notify);
+  notify('正在初始化 WebGPU 模型，首次运行可能需要几分钟…');
   const model = await AutoModelForSequenceClassification.from_pretrained(repository, {
-    ...options, dtype: 'fp32', device: 'webgpu', use_external_data_format: true,
+    revision, dtype: 'fp32', device: 'webgpu', use_external_data_format: false,
+    session_options: {externalData: [{path: weightFile, data: weights}]},
   });
   return {tokenizer, model};
 }

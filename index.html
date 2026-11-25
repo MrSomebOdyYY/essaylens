@@ -209,7 +209,7 @@ get('run').onclick = () => {
   busy(true);
   get('summary').textContent = '正在准备浏览器内的检测模型…';
   try {
-    if (!worker) worker = new Worker('./score-worker.js', {type:'module'});
+    if (!worker) worker = new Worker('./score-worker.js?v=2', {type:'module'});
     worker.onmessage = ({data}) => {
       if (data.id !== id || id !== pendingId) return;
       if (data.type === 'progress') {
